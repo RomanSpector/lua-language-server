@@ -670,6 +670,22 @@ local lookIntoChild = util.switch()
                 end
             end
             if not handler then
+                -- `getmetatable(x) == Class`: neither side is a literal, but the
+                -- check is the class-instance idiom -- narrow x to the class.
+                for i = 1, 2 do
+                    local side = action[i]
+                    if  side.type == 'call'
+                    and side.node.special == 'getmetatable'
+                    and side.args
+                    and side.args[1]
+                    and tracer.getMap[side.args[1]] then
+                        handler = side
+                        checker = action[3-i]
+                        break
+                    end
+                end
+            end
+            if not handler then
                 tracer:lookIntoChild(action[1], topNode)
                 tracer:lookIntoChild(action[2], topNode)
                 return topNode, outNode
@@ -763,6 +779,40 @@ local lookIntoChild = util.switch()
                             if outNode then
                                 outNode:narrow(tracer.uri, checker[1])
                             end
+                        end
+                    end
+                end
+            elseif handler.type == 'call'
+            and    handler.node.special == 'getmetatable'
+            and    handler.args
+            and    handler.args[1]
+            and    tracer.getMap[handler.args[1]] then
+                -- `if getmetatable(x) == Class then`
+                -- The metatable of an instance is its class table, so a match
+                -- narrows x to the class itself. The class side is a global
+                -- reference, not a literal: its name comes from the compiled
+                -- node, and anything without a global type name (nil, values)
+                -- is left alone.
+                local checkerNode = vm.compileNode(checker)
+                local checkerName
+                for _, cn in ipairs(checkerNode) do
+                    if cn.type == 'global' and cn.cate == 'type' then
+                        checkerName = cn.name
+                        break
+                    end
+                end
+                if checkerName then
+                    tracer:lookIntoChild(handler, topNode)
+                    topNode = topNode:copy()
+                    if action.op.type == '==' then
+                        topNode:narrow(tracer.uri, checkerName)
+                        if outNode then
+                            outNode:removeNode(checkerNode)
+                        end
+                    else
+                        topNode:removeNode(checkerNode)
+                        if outNode then
+                            outNode:narrow(tracer.uri, checkerName)
                         end
                     end
                 end
