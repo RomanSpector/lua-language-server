@@ -553,6 +553,51 @@ local searchFieldSwitch = util.switch()
         searchFieldByGlobalID(suri, source, key, pushResult)
     end)
 
+-- Keys of the fields declared with `---@field` on the parents of a class,
+-- at any depth of inheritance.
+---@param suri uri
+---@param class vm.global
+---@return table<any, true>
+local function getFieldKeysDeclaredByParents(suri, class)
+    local keys = {}
+    local mark = {}
+
+    local function searchParents(cls)
+        for _, set in ipairs(cls:getSets(suri)) do
+            if set.type == 'doc.class' and set.extends then
+                for _, extend in ipairs(set.extends) do
+                    local extendName
+                    if extend.type == 'doc.extends.name' then
+                        extendName = extend[1]
+                    elseif extend.type == 'doc.type.sign'
+                    and    extend.node then
+                        extendName = extend.node[1]
+                    end
+                    local extendType = type(extendName) == 'string'
+                                   and vm.getGlobal('type', extendName)
+                    if extendType and not mark[extendType] then
+                        mark[extendType] = true
+                        for _, extendSet in ipairs(extendType:getSets(suri)) do
+                            if extendSet.type == 'doc.class' then
+                                for _, field in ipairs(extendSet.fields) do
+                                    local fieldKey = guide.getKeyName(field)
+                                    if fieldKey then
+                                        keys[fieldKey] = true
+                                    end
+                                end
+                            end
+                        end
+                        searchParents(extendType)
+                    end
+                end
+            end
+        end
+    end
+
+    searchParents(class)
+    return keys
+end
+
 ---@param suri uri
 ---@param object vm.global
 ---@param key string|number|integer|boolean|vm.global|vm.ANY|vm.ANYDOC
@@ -567,6 +612,18 @@ function vm.getClassFields(suri, object, key, pushResult)
         end
         mark[name] = true
         searchedFields = searchedFields or {}
+
+        -- A field a parent declares with `---@field` keeps its declared type when
+        -- the class assigns a value to it, as it does for the declaring class
+        -- itself; only a method defined here overrides the declaration.
+        local parentFieldKeys
+        local function isDeclaredByParents(field, fieldKey)
+            if field.value and field.value.type == 'function' then
+                return false
+            end
+            parentFieldKeys = parentFieldKeys or getFieldKeysDeclaredByParents(suri, class)
+            return parentFieldKeys[fieldKey] == true
+        end
 
         local hasFounded = {}
         local function copyToSearched()
@@ -614,7 +671,8 @@ function vm.getClassFields(suri, object, key, pushResult)
                             local fieldKey = guide.getKeyName(field)
                             if fieldKey then
                                 if  not searchedFields[fieldKey]
-                                and guide.isAssign(field) then
+                                and guide.isAssign(field)
+                                and not isDeclaredByParents(field, fieldKey) then
                                     hasFounded[fieldKey] = true
                                     pushResult(field, true)
                                 end
@@ -634,7 +692,8 @@ function vm.getClassFields(suri, object, key, pushResult)
                                 local fieldKey = guide.getKeyName(field)
                                 if fieldKey then
                                     if  not searchedFields[fieldKey]
-                                    and guide.isAssign(field) then
+                                    and guide.isAssign(field)
+                                    and not isDeclaredByParents(field, fieldKey) then
                                         hasFounded[fieldKey] = true
                                         pushResult(field, true)
                                     end
@@ -656,7 +715,8 @@ function vm.getClassFields(suri, object, key, pushResult)
                         if fieldKey and not searchedFields[fieldKey] then
                             if  not searchedFields[fieldKey]
                             and guide.isAssign(field)
-                            and field.value then
+                            and field.value
+                            and not isDeclaredByParents(field, fieldKey) then
                                 if  vm.getVariableID(field)
                                 and vm.getVariableID(field) == vm.getVariableID(field.value) then
                                 elseif vm.getGlobalNode(src)
