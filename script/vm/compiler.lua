@@ -615,10 +615,13 @@ function vm.getClassFields(suri, object, key, pushResult)
 
         -- A field a parent declares with `---@field` keeps its declared type when
         -- the class assigns a value to it, as it does for the declaring class
-        -- itself; only a method defined here overrides the declaration.
+        -- itself. A method defined here overrides the declaration, and so does
+        -- a table constructor with fields: it describes its own keys, which the
+        -- declared container type cannot point to.
         local parentFieldKeys
         local function isDeclaredByParents(field, fieldKey)
-            if field.value and field.value.type == 'function' then
+            local value = field.value
+            if value and (value.type == 'function' or (value.type == 'table' and #value > 0)) then
                 return false
             end
             parentFieldKeys = parentFieldKeys or getFieldKeysDeclaredByParents(suri, class)
