@@ -126,6 +126,72 @@ local function checkSee(source, results)
     end
 end
 
+---@param field parser.object
+---@return boolean
+local function isFunctionField(field)
+    if field.type ~= 'doc.field' or not field.extends then
+        return false
+    end
+    for _, fieldType in ipairs(field.extends.types) do
+        if fieldType.type == 'doc.type.function' then
+            return true
+        end
+    end
+    return false
+end
+
+--- The `fun(...)` type written in a `---@field` declaration.
+---@param def parser.object
+---@return boolean
+local function isFunctionType(def)
+    local docType = def.type == 'doc.type.function' and def.parent
+    return docType and docType.type == 'doc.type' and isFunctionField(docType.parent) or false
+end
+
+-- A method declared with `---@field name fun(...)` jumps to where it is
+-- implemented: the declaration only describes the signature. With nothing
+-- implementing it, the jump goes to the declared name alone rather than to
+-- both the name and the `fun(...)` type written next to it.
+---@async
+---@param source parser.object
+---@param defs parser.object[]
+---@return parser.object[]
+local function preferImplementations(source, defs)
+    local hasFunctionField = false
+    for _, def in ipairs(defs) do
+        if isFunctionField(def) then
+            hasFunctionField = true
+            break
+        end
+    end
+    if not hasFunctionField then
+        return defs
+    end
+
+    local results = {}
+    local mark = {}
+    for _, ref in ipairs(vm.getRefs(source)) do
+        if  guide.isAssign(ref)
+        and ref.value
+        and ref.value.type == 'function'
+        and not mark[ref] then
+            mark[ref] = true
+            results[#results+1] = ref
+        end
+    end
+    local implemented = #results > 0
+
+    for _, def in ipairs(defs) do
+        if not mark[def]
+        and not isFunctionType(def)
+        and not (implemented and isFunctionField(def)) then
+            mark[def] = true
+            results[#results+1] = def
+        end
+    end
+    return results
+end
+
 ---@async
 return function (uri, offset)
     local ast = files.getState(uri)
@@ -156,7 +222,7 @@ return function (uri, offset)
 
     checkSee(source, results)
 
-    local defs = vm.getDefs(source)
+    local defs = preferImplementations(source, vm.getDefs(source))
 
     for _, def in ipairs(defs) do
         local src = def
