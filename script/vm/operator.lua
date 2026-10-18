@@ -64,6 +64,26 @@ local function getOperandInfers(source)
     return guide.getUri(source), vm.getInfer(source[1]), vm.getInfer(source[2])
 end
 
+--- Whether a bitwise operand is an integer: either `integer` itself or a
+--- type whose every value is an integer, such as an `---@enum` of integers.
+---@param uri uri
+---@param infer vm.infer
+---@return boolean
+local function isIntegerOperand(uri, infer)
+    if infer:hasType(uri, 'integer') then
+        return true
+    end
+    if infer:hasUnknown(uri) or infer:hasAny(uri) then
+        return false
+    end
+    for _, view in ipairs(infer:getSubViews(uri)) do
+        if vm.isSubType(uri, view, 'integer') ~= true then
+            return false
+        end
+    end
+    return true
+end
+
 ---@param operators parser.object[]
 ---@param op string
 ---@param value? parser.object
@@ -314,8 +334,8 @@ vm.binarySwitch = util.switch()
             end
             -- Bitwise ops on integers always produce integer
             local uri, infer1, infer2 = getOperandInfers(source)
-            if  infer1:hasType(uri, 'integer')
-            and infer2:hasType(uri, 'integer') then
+            if  isIntegerOperand(uri, infer1)
+            and isIntegerOperand(uri, infer2) then
                 vm.setNode(source, vm.declareGlobal('type', 'integer'))
             end
         end
