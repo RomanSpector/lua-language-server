@@ -156,6 +156,36 @@ local a = 1 << 20
 local <?b?> = (a << 1) - 1
 ]]
 
+TEST 'integer' [[
+---@enum Flags
+local Flags = { A = 1, B = 2 }
+
+---@type Flags
+local flags
+
+local <?x?> = flags & ~Flags.B
+]]
+
+TEST 'integer' [[
+---@enum Flags
+local Flags = { A = 1, B = 2 }
+
+---@type Flags
+local flags
+
+local <?x?> = (flags & ~(Flags.A | Flags.B)) | Flags.A
+]]
+
+TEST 'unknown' [[
+---@enum Names
+local Names = { A = 'a' }
+
+---@type Names
+local name
+
+local <?x?> = name & 1
+]]
+
 TEST 'unknown' [[
 <?x?> = a .. b
 ]]
